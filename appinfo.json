@@ -1,0 +1,78 @@
+{
+    "appKeys": {},
+    "capabilities": [
+        "configurable"
+    ],
+    "companyName": "trapias@gmail.com",
+    "longName": "Petrello",
+    "projectType": "pebblejs",
+    "resources": {
+        "media": [
+            {
+                "file": "images/menu_icon.png",
+                "menuIcon": true,
+                "name": "IMAGE_MENU_ICON",
+                "type": "bitmap"
+            },
+            {
+                "file": "images/logo_splash.png",
+                "name": "IMAGE_LOGO_SPLASH",
+                "type": "bitmap"
+            },
+            {
+                "file": "images/tile_splash.png",
+                "name": "IMAGE_TILE_SPLASH",
+                "type": "bitmap"
+            },
+            {
+                "file": "fonts/UbuntuMono-Regular.ttf",
+                "name": "MONO_FONT_14",
+                "type": "font"
+            },
+            {
+                "file": "images/unchecked.png",
+                "name": "IMAGES_UNCHECKED_PNG",
+                "type": "bitmap"
+            },
+            {
+                "file": "images/checked.png",
+                "name": "IMAGES_CHECKED_PNG",
+                "type": "bitmap"
+            },
+            {
+                "file": "images/Listicon.png",
+                "name": "IMAGES_LISTICON_PNG",
+                "type": "bitmap"
+            },
+            {
+                "file": "images/menu_icon_inv.png",
+                "name": "IMAGES_MENU_ICON_INV_PNG",
+                "type": "bitmap"
+            },
+            {
+                "file": "images/menu_icon.png",
+                "name": "IMAGES_MENU_ICON_PNG",
+                "type": "bitmap"
+            },
+            {
+                "file": "images/logo_splash.png",
+                "name": "IMAGES_LOGO_SPLASH_PNG",
+                "type": "png"
+            }
+        ]
+    },
+    "sdkVersion": "3",
+    "shortName": "Petrello",
+    "targetPlatforms": [
+        "aplite",
+        "basalt",
+        "chalk"
+    ],
+    "uuid": "38b0e564-5394-4794-903e-6a07e93764a2",
+    "versionCode": 1,
+    "versionLabel": "1.0",
+    "watchapp": {
+        "hiddenApp": false,
+        "watchface": false
+    }
+}
