@@ -514,7 +514,7 @@ function ShowCheckListItem(title, description, state, cardID, itemID) {
           Vibe.vibrate('short');
           // reload
           iwin.hide();
-          ShowCheckListItem(title, description, newState, cardID, itemID)
+          ShowCheckListItem(title, description, newState, cardID, itemID);
           return;
         },
         function(error, status, request) {
