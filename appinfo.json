@@ -29,6 +29,21 @@
                 "type": "font"
             },
             {
+                "file": "images/move_icon.png",
+                "name": "IMAGES_MOVE_ICON_PNG",
+                "type": "bitmap"
+            },
+            {
+                "file": "images/music_icon_ellipsis.png",
+                "name": "IMAGES_MUSIC_ICON_ELLIPSIS_PNG",
+                "type": "bitmap"
+            },
+            {
+                "file": "images/TIMELINE_CALENDAR.png",
+                "name": "IMAGES_TIMELINE_CALENDAR_PNG",
+                "type": "bitmap"
+            },
+            {
                 "file": "images/Listicon.png",
                 "name": "IMAGES_LISTICON_PNG",
                 "type": "bitmap"
@@ -70,7 +85,7 @@
     ],
     "uuid": "15a09f1b-aded-4d50-bfbd-31e56a75fc71",
     "versionCode": 1,
-    "versionLabel": "1.3",
+    "versionLabel": "1.4",
     "watchapp": {
         "hiddenApp": false,
         "watchface": false

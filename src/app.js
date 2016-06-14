@@ -3,7 +3,16 @@
  *
  * A simple Trello client for Pebble smartwatches
  * Alberto Velo, http://trapias.github.io
- * 
+ *
+ * Changelog:
+ * - 1.3: bugfix, was unable to load boards not belonging to an organization
+ * - 1.4: 
+ *   - fix accelerator refreshes
+ *   - fix token usage after first setup
+ *   - change actionbar to black, with Pebble std icons
+ *   - show due date on cards
+ *   - new submenu for the card level, allows to perform more actions
+ *   - new capability to move a card to another list
  */
 var UI = require('ui');
 var Vector2 = require('vector2');
@@ -12,6 +21,13 @@ var ajax = require('ajax');
 var Feature = require('platform/feature');
 var Accel = require('ui/accel');
 var Settings = require('settings');
+// var Timeline = require('timeline');
+
+// globals
+var organizations = [], lists = [];
+var currentView=null, currentBoardID = null, currentCardID = null, currentMenu = null, currentBoardLists=null;
+var token = Settings.option('token');
+// please manually set token here to test with pebble emulator
 
 // Set a configurable with just the close callback
 Settings.config(
@@ -27,11 +43,6 @@ Settings.config(
     }
   }
 );
-
-var organizations = [], lists = [];
-var currentView=null, currentBoardID = null, currentCardID = null, currentMenu = null;
-var token = Settings.option('token');
-// please manually set token here to test with pebble emulator
 
 var main = new UI.Window({
     backgroundColor: 'black'
@@ -65,8 +76,9 @@ var main = new UI.Window({
 main.show();
 
 Accel.on('tap', function(e) {
-  console.log('Tap event on axis: ' + e.axis + ' and direction: ' + e.direction);
+  console.log('Tap event on axis: ' + e.axis + ' and direction: ' + e.direction + ', currentView = ' + currentView);
   
+  // monitor the x axis to test with emulator, y in real app so to monitor wrist twist
   if(e.axis==='y') {
     // refresh current view
     switch(currentView) {
@@ -77,6 +89,7 @@ Accel.on('tap', function(e) {
         }
         organizations=[];
         ShowBoards();
+        Vibe.vibrate('double');
         break;
 
         case 'Lists':
@@ -85,19 +98,30 @@ Accel.on('tap', function(e) {
         }
         lists=[];
         ShowLists(currentBoardID);
+        Vibe.vibrate('double');
         break;
 
         case 'Card':
         if(currentMenu!==null) {
           currentMenu.hide();
         }
+        ShowCard(currentCardID);
+        Vibe.vibrate('double');
+        break;
+
+        case 'CheckList':
+        if(currentMenu!==null) {
+          currentMenu.hide();
+        }
         ShowCheckList(currentCardID);
+        Vibe.vibrate('double');
         break;
 
         default:
+        // do nothing
         break;
     }
-    Vibe.vibrate('double');
+    
   }
 });
 
@@ -149,7 +173,10 @@ function Loading(title) {
 }
 
 function ShowBoards() {
-
+  if(token===undefined) {
+    // re-read token, fix issue at first run (avoid having to close and open again watchapp)
+    token = Settings.option('token');
+  }
   if(token===undefined) {
     PleaseConfigure();
     return;
@@ -277,7 +304,7 @@ function ShowLists(boardID) {
     return;
   }
 
-  lists = [];
+  lists = [], allLists = [];
   currentBoardID = boardID;
   console.log('LOAD LISTS FROM NETWORK');
   ajax({
@@ -291,6 +318,11 @@ function ShowLists(boardID) {
         var theList = data[b];
         if(!arrayContainsValue(lists, theList.id)) {
           // console.log('List ' + theList.name + ' has ' + theList.cards.length + ' cards');
+          allLists.push({
+            title: theList.name,
+            id: theList.id,
+            idBoard: theList.idBoard
+          });
           if(theList.cards.length>0) {
             lists.push({
               title: theList.name,
@@ -326,6 +358,7 @@ function ShowLists(boardID) {
       }
       
       card.hide();
+      currentBoardLists = allLists;
       buildListsMenu(lists);
 
     },
@@ -364,29 +397,29 @@ function ShowCard(cardID) {
       type: 'json'
     },
     function(data, status, request) {
+      // console.log('data: ' + JSON.stringify(data));
 
       card.hide();
       var w = null;
 
-      if(data.badges.checkItems>0) {
-        w = new UI.Card({
+      w = new UI.Card({
+        title: data.name,
           backgroundColor: 'white',
           scrollable: true,
           action: {
-            backgroundColor: 'white',
-            // up: 'images/Listicon.png', // comments?
-            // down: 'images/Listicon.png',      // attachs?
-            select: 'images/Listicon.png'     // checklists
+            backgroundColor: 'black',
+            select: 'images/music_icon_ellipsis.png'     // cards actions menu
           }
         });
-      } else {
-        w = new UI.Card({
-          backgroundColor: 'white',
-          scrollable: true
-        });
-      }
 
-      w.title(data.name);
+      if(data.due!==null && data.due!=="") {
+        // w.subicon('images/TIMELINE_CALENDAR.png');
+        w.icon('images/TIMELINE_CALENDAR.png');
+        var dt = new Date(data.due);
+        var options = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: 'numeric' };
+        w.subtitle('Due ' + dt.toLocaleDateString(dt.getTimezoneOffset(),options) + ' ' + dt.toLocaleTimeString(dt.getTimezoneOffset(),options));
+
+      }
 
       // too big text causes an exception! 
       if(data.desc.length>420) {
@@ -395,13 +428,12 @@ function ShowCard(cardID) {
         w.body(data.desc);
       }
       
-
-      if(data.badges.checkItems>0) {
         w.on('click', 'select', function() {
-          ShowCheckList(data.id);
+          ShowCardMenu(data.id, data.badges.checkItems);
         });
-      }
      
+     currentView = 'Card';
+     currentCardID = cardID;
       w.show();
 
     },
@@ -411,6 +443,92 @@ function ShowCard(cardID) {
       card.body(error);
       card.show();
     });
+}
+
+function ShowCardMenu(cardID, checkItems) {
+  var items=[{
+              title: 'Move Card',
+              idCard: cardID,
+              icon: 'images/move_icon.png'
+            }];
+  console.log('ShowCardMenu checkItems=' + checkItems);
+
+  if(checkItems>0) {
+    items.push({
+      title: 'Show Checklists',
+      idCard: cardID,
+      icon: 'images/Listicon.png'
+    });
+  }
+  var menu = new UI.Menu( {
+    highlightBackgroundColor: Feature.color('vivid-violet', 'dark-gray'),
+        icon: 'images/menu_icon.png',
+        sections: [{
+          title: 'Choose an action',
+          backgroundColor: 'white',
+          textColor: 'black',
+          items: items
+        }]
+  });
+
+  menu.on('select', function(e) {
+
+    switch(e.itemIndex) {
+      case 0:
+      menu.hide();
+      ShowMoveCardMenu(cardID);
+      break;
+
+      case 1:
+      // move card to another list
+      menu.hide();
+      ShowCheckList(cardID);
+      break;
+    }
+
+  });
+
+  menu.show();
+}
+
+function ShowMoveCardMenu(cardID) {
+  var menu = new UI.Menu( {
+    highlightBackgroundColor: Feature.color('vivid-violet', 'dark-gray'),
+        icon: 'images/menu_icon.png',
+        sections: [{
+          title: 'Move card to...',
+          backgroundColor: 'white',
+          textColor: 'black',
+          items: currentBoardLists
+        }]
+  });
+
+  menu.on('select', function(e) {
+    // move card to list e.item.id
+    console.log('Move card to list ' + e.item.title + ', ' + e.item.id);
+      ajax({
+        url: 'https://api.trello.com/1/card/' + cardID + '?idList=' + e.item.id + '&key=12336dca832251b5d7405c340e278b9f&token=' + token,
+        type: 'json',
+        method: 'put'
+      },
+      function(data, status, request) {
+        Vibe.vibrate('short');
+        // reload card
+        menu.hide();
+        ShowCard(cardID);
+        return;
+      },
+      function(error, status, request) {
+        console.log('The ajax request failed: ' + error);
+        // menu.clear(true);
+        menu.title("Error");
+        menu.body(error);
+      });
+
+
+  });
+
+  menu.show();
 }
 
 function ShowCheckList(cardID,sectionIndex, itemIndex) {
@@ -490,7 +608,7 @@ function ShowCheckList(cardID,sectionIndex, itemIndex) {
       });
 
       currentCardID = cardID;
-      currentView = 'Card';
+      currentView = 'CheckList';
       itemsMenu.show();
       currentMenu = itemsMenu;
 
@@ -519,8 +637,8 @@ function ShowCheckListItem(title, description, state, cardID, itemID) {
           body: description,
           scrollable: true,
           action: {
-            backgroundColor: 'white',
-            select: 'images/checked.png'     // checklists
+            backgroundColor: 'black',
+            select: 'images/action_bar_icon_check.png'     // checklists
           }
         });
 
