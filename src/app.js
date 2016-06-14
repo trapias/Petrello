@@ -176,33 +176,59 @@ function ShowBoards() {
     },
     function(data, status, request) {
 
+      // console.log('DATA: ' + JSON.stringify(data));
+
       // step1: parse organizations
       for(var b = 0; b < data.length; b++) {
         var theBoard = data[b];
-        if(!arrayContainsValue(organizations, theBoard.organization.id)) {
-          organizations.push({
-            title: theBoard.organization.displayName,
-            id: theBoard.organization.id,
-            idBoards: theBoard.idBoards,
-            items: [],
-            backgroundColor: Feature.color('black', 'black'),
-            textColor: Feature.color('white', 'white')
-          });
+        if(theBoard.organization!==undefined) {
+          if(!arrayContainsValue(organizations, theBoard.organization.id)) {
+            organizations.push({
+              title: theBoard.organization.displayName,
+              id: theBoard.organization.id,
+              idBoards: theBoard.idBoards,
+              items: [],
+              backgroundColor: Feature.color('black', 'black'),
+              textColor: Feature.color('white', 'white')
+            });
+          }
+        } else {
+          if(!arrayContainsValue(organizations, null)) {
+            organizations.push({
+              title: '[Without organization]',
+              id: null,
+              idBoards: theBoard.idBoards,
+              items: [],
+              backgroundColor: Feature.color('black', 'black'),
+              textColor: Feature.color('white', 'white')
+            });
+          }
         }
+        
       }
 
       // step2: add boards to organizations
       for(var o = 0; o < organizations.length; o++) {
         for(b = 0; b < data.length; b++) {
           var aBoard = data[b];
-          if(aBoard.organization.id === organizations[o].id) {
-            // add to org items
-            organizations[o].items.push({
-              title: aBoard.name,
-              id: aBoard.id,
-              // icon: 'images/menu_icon.png'
-            });
+          if(aBoard.organization!==undefined) {
+            if(aBoard.organization.id === organizations[o].id) {
+              // add to org items
+              organizations[o].items.push({
+                title: aBoard.name,
+                id: aBoard.id
+              });
+            }
+          } else {
+            if(null === organizations[o].id) {
+              // add to org items
+              organizations[o].items.push({
+                title: aBoard.name,
+                id: aBoard.id
+              });
+            }
           }
+          
         }
       }
       
@@ -540,4 +566,3 @@ function PleaseConfigure() {
         });
         iwin.show();       
 }
-
