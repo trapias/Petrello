@@ -29,6 +29,16 @@
                 "type": "font"
             },
             {
+                "file": "images/icon-user.png",
+                "name": "IMAGES_ICON_USER_PNG",
+                "type": "bitmap"
+            },
+            {
+                "file": "images/star-icon.png",
+                "name": "IMAGES_STAR_ICON_PNG",
+                "type": "bitmap"
+            },
+            {
                 "file": "images/move_icon.png",
                 "name": "IMAGES_MOVE_ICON_PNG",
                 "type": "bitmap"
@@ -85,7 +95,7 @@
     ],
     "uuid": "15a09f1b-aded-4d50-bfbd-31e56a75fc71",
     "versionCode": 1,
-    "versionLabel": "1.4",
+    "versionLabel": "1.5",
     "watchapp": {
         "hiddenApp": false,
         "watchface": false

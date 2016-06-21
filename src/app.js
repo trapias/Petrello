@@ -13,6 +13,9 @@
  *   - show due date on cards
  *   - new submenu for the card level, allows to perform more actions
  *   - new capability to move a card to another list
+ * - 1.5:
+ *   - refactored navigation with a main menu and new ways to navigate Trello data
+ *   - bugfixes
  */
 var UI = require('ui');
 var Vector2 = require('vector2');
@@ -22,58 +25,72 @@ var Feature = require('platform/feature');
 var Accel = require('ui/accel');
 var Settings = require('settings');
 // var Timeline = require('timeline');
+// var timeline = require('./timeline');
 
 // globals
 var organizations = [], lists = [];
-var currentView=null, currentBoardID = null, currentCardID = null, currentMenu = null, currentBoardLists=null;
+var currentView=null, currentBoardID = null, currentCardID = null, currentMenu = null, currentFilter=null, currentParam=null, currentBoardName=null, currentlistID = null, currentlistTitle = null;
 var token = Settings.option('token');
 // please manually set token here to test with pebble emulator
 
 // Set a configurable with just the close callback
 Settings.config(
-  { url: 'https://trello.com/1/authorize?callback_method=fragment&scope=read,write&expiration=never&name=Petrello&key=12336dca832251b5d7405c340e278b9f&return_url=http://trapias.github.io/petrello.html' },
-  function(e) {
-    console.log('closed configurable');
-    // Show the parsed response
-    // console.log(JSON.stringify(e.options));
+   { url: 'https://trello.com/1/authorize?callback_method=fragment&scope=read,write&expiration=never&name=Petrello&key=12336dca832251b5d7405c340e278b9f&return_url=http://trapias.github.io/petrello.html' },
+   function(e) {
+     console.log('closed configurable');
+     // Show the parsed response
+     // console.log(JSON.stringify(e.options));
+     // Show the raw response if parsing failed
+     if (e.failed) {
+       console.log(e.response);
+     }
+   }
+ );
 
-    // Show the raw response if parsing failed
-    if (e.failed) {
-      console.log(e.response);
-    }
-  }
-);
+// Pebble.addEventListener('ready', function() {
+  var main = new UI.Window({
+      backgroundColor: 'black'
+    });
 
-var main = new UI.Window({
-    backgroundColor: 'black'
-  });
+    var image = new UI.Image({
+      position: new Vector2(0, 5),
+      size: new Vector2(144, 168),
+      image: 'images/logo_splash.png'
+    });
+    main.add(image);
 
-  var image = new UI.Image({
-    position: new Vector2(0, 5),
-    size: new Vector2(144, 168),
-    image: 'images/logo_splash.png'
-  });
-  main.add(image);
+    var pTitle = new UI.Text({
+      position: new Vector2(0, 0),
+      size: new Vector2(144, 60),
+      font: 'gothic-24-bold',
+      text: 'Petrello',
+      textAlign: 'center'
+    });
+    main.add(pTitle);
 
-  var pTitle = new UI.Text({
-    position: new Vector2(0, 0),
-    size: new Vector2(144, 60),
-    font: 'gothic-24-bold',
-    text: 'Petrello',
-    textAlign: 'center'
-  });
-  main.add(pTitle);
+    var pFooter = new UI.Text({
+      position: new Vector2(0, 140),
+      size: new Vector2(144, 60),
+      font: 'gothic-24-bold',
+      text: 'Press any key',
+      textAlign: 'center'
+    });
+    main.add(pFooter);
 
-  var pFooter = new UI.Text({
-    position: new Vector2(0, 140),
-    size: new Vector2(144, 60),
-    font: 'gothic-24-bold',
-    text: 'Press any key',
-    textAlign: 'center'
-  });
-  main.add(pFooter);
-  
-main.show();
+    main.on('click', 'up', function(e) {
+      ShowMainMenu();
+    });
+
+    main.on('click', 'down', function(e) {
+      ShowMainMenu();
+    });
+
+    main.on('click', 'select', function(e) {
+      ShowMainMenu();
+    });
+    
+  main.show();
+// });
 
 Accel.on('tap', function(e) {
   console.log('Tap event on axis: ' + e.axis + ' and direction: ' + e.direction + ', currentView = ' + currentView);
@@ -82,13 +99,12 @@ Accel.on('tap', function(e) {
   if(e.axis==='y') {
     // refresh current view
     switch(currentView) {
-      case null:
       case 'Boards':
         if(currentMenu!==null) {
           currentMenu.hide();
         }
         organizations=[];
-        ShowBoards();
+        ShowBoards(currentFilter, currentParam);
         Vibe.vibrate('double');
         break;
 
@@ -97,8 +113,12 @@ Accel.on('tap', function(e) {
           currentMenu.hide();
         }
         lists=[];
-        ShowLists(currentBoardID);
+        ShowLists(currentBoardID, currentBoardName);
         Vibe.vibrate('double');
+        break;
+
+        case 'List':
+        ShowList(currentlistID, currentlistTitle);
         break;
 
         case 'Card':
@@ -113,8 +133,16 @@ Accel.on('tap', function(e) {
         if(currentMenu!==null) {
           currentMenu.hide();
         }
-        ShowCheckList(currentCardID);
+        ShowCheckLists(currentCardID);
         Vibe.vibrate('double');
+        break;
+
+        case 'MyCards':
+        ShowMyCards();
+        break;
+
+        case 'Organizations':
+        ShowOrganizations();
         break;
 
         default:
@@ -123,18 +151,6 @@ Accel.on('tap', function(e) {
     }
     
   }
-});
-
-main.on('click', 'up', function(e) {
-  ShowBoards();
-});
-
-main.on('click', 'down', function(e) {
-  ShowBoards();
-});
-
-main.on('click', 'select', function(e) {
-  ShowBoards();
 });
 
 function arrayContainsValue(arr, val) {
@@ -172,7 +188,218 @@ function Loading(title) {
   return win;
 }
 
-function ShowBoards() {
+function ShowMainMenu() {
+  if(token===undefined) {
+    // re-read token, fix issue at first run (avoid having to close and open again watchapp)
+    token = Settings.option('token');
+  }
+  if(token===undefined) {
+    PleaseConfigure();
+    return;
+  }
+
+  var menu = new UI.Menu( {
+    highlightBackgroundColor: Feature.color('vivid-violet', 'dark-gray'),
+        icon: 'images/menu_icon.png',
+        sections: [{
+          title: 'Select a section',
+          backgroundColor: 'black',
+          textColor: 'white',
+          items: [
+            {
+              title: 'Starred boards',
+              icon: 'images/star-icon.png'
+            },
+            {
+              title: 'My boards',
+              icon: 'images/menu_icon.png'
+            },
+            {
+              title: 'Organizations',
+              icon: 'images/menu_icon.png'
+            },
+            {
+              title: 'All boards',
+              icon: 'images/menu_icon.png'
+            },
+            {
+              title: 'My cards',
+              icon: 'images/icon-user.png'
+            }
+          ]
+        }]
+  });
+
+  menu.on('select', function(e) {
+    switch(e.itemIndex) {
+      case 0:
+      ShowBoards('starred');
+      break;
+
+      case 1: // boards without an organization
+      ShowBoards('private');
+      break;
+
+      case 2: // organizations
+      ShowOrganizations();
+      break;
+
+      case 3: // all boards
+      ShowBoards('open');
+      break;
+
+      case 4:
+      ShowMyCards();
+      break;
+      }
+  });
+
+  menu.show();
+}
+
+function ShowMyCards() {
+  if(token===undefined) {
+    // re-read token, fix issue at first run (avoid having to close and open again watchapp)
+    token = Settings.option('token');
+  }
+  if(token===undefined) {
+    PleaseConfigure();
+    return;
+  }
+
+  var card = Loading('Loading my cards...');
+  
+   ajax({
+      url: 'https://api.trello.com/1/member/me/cards?members=true&filter=open&fields=name,idBoard,idList&key=12336dca832251b5d7405c340e278b9f&token=' + token,
+      type: 'json'
+    },
+    function(data, status, request) {
+
+      // lists = [{title: 'My cards', items: []}];
+      lists = [];
+      var cards = [];
+
+      // step1: parse cards
+      for(var b = 0; b < data.length; b++) {
+        var theCard = data[b];
+
+        if(theCard.closed) {continue;}
+          
+          if(!arrayContainsValue(lists, theCard.idList)) {
+              lists.push({
+                id: theCard.idList,
+                items: [],
+              });
+            // }
+          }
+            
+          cards.push({
+            title: theCard.name,
+            id: theCard.id,
+            idBoard: theCard.idBoard,
+            idList: theCard.idList,
+          });
+      }
+
+      for(var l=0; l < lists.length; l++) {
+        for(var c=0; c < cards.length; c++) {
+          // append cards to lists
+          // console.log('card idlist ' + cards[c].idList + ' VS ' + lists[l].id);
+          if(cards[c].idList == lists[l].id) {
+            // console.log('adding card ' + cards[c].title + ' to list ' + lists[l].title);
+            lists[l].items.push(cards[c]);
+          }
+        }
+      }
+
+      currentView = 'MyCards';
+      LoadMyCardsSections(card);
+
+    },
+    function(error, status, request) {
+      console.log('The ajax request failed: ' + error + ', status: ' + status);
+      card.hide();
+      ShowError(error);
+    });
+}
+
+var listTitles=[];
+
+function getListTitle(id) {
+  // console.log('getListTitle ' + id + ' vs ' + JSON.stringify(listTitles));
+  for(var r=0; r < listTitles.length; r++) {
+    if(listTitles[r].id === id) {
+      return listTitles[r].title;
+    }
+  }
+  return '';
+}
+
+function myCardsCallback(card) {
+  // console.log('myCardsCallback: ' + JSON.stringify(lists));
+  card.hide();
+
+  var finalList = [];
+  for(var i=0; i<lists.length; i++) {
+    finalList.push({
+      id: lists[i].id,
+      title: getListTitle(lists[i].id),
+      items: lists[i].items,
+      backgroundColor: Feature.color('black', 'black'),
+      textColor: Feature.color('white', 'white')
+    });
+  }
+
+  var itemsMenu = new UI.Menu({
+      highlightBackgroundColor: Feature.color('vivid-violet', 'dark-gray'),
+      sections: finalList
+    });
+
+    itemsMenu.on('select', function(e) {
+      // console.log('Selected item #' + e.itemIndex + ' of section #' + e.sectionIndex);
+      ShowCard(e.item.id);
+    });
+
+  itemsMenu.show();
+  currentMenu = itemsMenu;
+}
+
+
+function LoadMyCardsSections(card) {
+  var nAll = lists.length, nCompleted=0;
+  listTitles = [];
+
+  for(var i=0; i<nAll; i++) {
+    // console.log('get title for list id ' + lists[i].id + ' with title ' + lists[i].title);
+
+    // console.log('get title for list ' + thisList.id);
+
+    ajax({
+      url: 'https://api.trello.com/1/lists/' + lists[i].id + '?board=true&fields=name&board_fields=name&key=12336dca832251b5d7405c340e278b9f&token=' + token,
+      type: 'json',
+      async: true
+    },
+    function(data, status, request) {
+      listTitles.push({
+        id: data.id,
+        boardID: data.board.id,
+        boardName: data.board.name,
+        title: data.board.name + '>' + data.name
+      });
+      nCompleted++;
+      if(nCompleted===nAll) {myCardsCallback(card);}
+    },
+    function(error, status, request) {
+      console.log('The ajax request failed: ' + error + ', status: ' + status);
+      // nCompleted++;
+      // if(nCompleted===nAll) {myCardsCallback(card);}
+      ShowError(error);
+      return;
+    }); 
+  }
+}
+
+function ShowBoards(filter, param) {
   if(token===undefined) {
     // re-read token, fix issue at first run (avoid having to close and open again watchapp)
     token = Settings.option('token');
@@ -183,12 +410,8 @@ function ShowBoards() {
   }
 
   var card = Loading('Loading Boards...');
-  // console.log('OPTIONS: ' + Settings.option());
-  // console.log('ShowBoards: token = ' + token);
-  // console.log('OPTIONS: ' + JSON.stringify(Settings.option()));
-  // // todo: show "please configure if token missing"
 
-  if(organizations.length>0) {
+  if(organizations.length>0 && currentFilter===filter && currentParam===param) {
     // already loaded (cached)
     console.log('LOAD BOARDS FROM CACHE');
     card.hide();
@@ -196,19 +419,53 @@ function ShowBoards() {
     return;
   }
 
-  console.log('LOAD BOARDS FROM NETWORK');
+  // save to allow refresh via accellerator
+  currentFilter=filter;
+  currentParam = param;
+
+  // console.log("token? " + Settings.option('token'));
+  // console.log("createpins? " + Settings.option('createpins'));
+  // console.log('OPTIONS: ' + JSON.stringify(options));
+  
+  // console.log('OPTIONS: ' + Settings.option());
+  // console.log('ShowBoards: token = ' + token);
+  // console.log('OPTIONS: ' + JSON.stringify(Settings.option()));
+  
+  // console.log('LOAD BOARDS FROM NETWORK');
+  organizations = []; // reset 
+  var sFilter = 'open', onlyPriv = false, singleOrgID = null;
+  if(filter!==null) {
+
+    switch(filter) {
+      case 'private':
+      onlyPriv = true;
+      break;
+
+      case 'organization':
+      singleOrgID = param;
+      break;
+
+      default:
+      sFilter = filter;
+    }
+  }
+
   ajax({
-      url: 'https://api.trello.com/1/member/me/boards?fields=name,idOrganization&filter=open&organization=true&key=12336dca832251b5d7405c340e278b9f&token=' + token,
+      url: 'https://api.trello.com/1/member/me/boards?fields=name,idOrganization,closed&filter=' + sFilter + '&organization=true&key=12336dca832251b5d7405c340e278b9f&token=' + token,
       type: 'json'
     },
     function(data, status, request) {
 
       // console.log('DATA: ' + JSON.stringify(data));
-
+      
       // step1: parse organizations
       for(var b = 0; b < data.length; b++) {
         var theBoard = data[b];
+
+        if(theBoard.closed===true) {continue;} // only show open boards
         if(theBoard.organization!==undefined) {
+          if(onlyPriv===true) {continue;}
+          if(singleOrgID!==null && theBoard.organization.id !== singleOrgID) {continue;}
           if(!arrayContainsValue(organizations, theBoard.organization.id)) {
             organizations.push({
               title: theBoard.organization.displayName,
@@ -220,9 +477,10 @@ function ShowBoards() {
             });
           }
         } else {
+          if(singleOrgID!==null) {continue;}
           if(!arrayContainsValue(organizations, null)) {
             organizations.push({
-              title: '[Without organization]',
+              title: 'My Boards',
               id: null,
               idBoards: theBoard.idBoards,
               items: [],
@@ -238,7 +496,10 @@ function ShowBoards() {
       for(var o = 0; o < organizations.length; o++) {
         for(b = 0; b < data.length; b++) {
           var aBoard = data[b];
+          if(aBoard.closed===true) {continue;} // only show open boards
           if(aBoard.organization!==undefined) {
+            if(onlyPriv===true) {continue;}
+            if(singleOrgID!==null && aBoard.organization.id !== singleOrgID) {continue;}
             if(aBoard.organization.id === organizations[o].id) {
               // add to org items
               organizations[o].items.push({
@@ -247,6 +508,7 @@ function ShowBoards() {
               });
             }
           } else {
+            if(singleOrgID!==null) {continue;}
             if(null === organizations[o].id) {
               // add to org items
               organizations[o].items.push({
@@ -255,25 +517,35 @@ function ShowBoards() {
               });
             }
           }
-          
         }
       }
-      
+
       card.hide();
+
+      if(organizations.length===0 || organizations[0].items.length===0) {
+        var empty = new UI.Card({
+          title: 'No data',
+          body: 'No open boards found'
+        });
+
+        empty.on('hide', function() {
+          console.log('hide empty');
+        });
+        empty.show();
+        return;
+      }
+
       buildBoardsMenu(organizations);
 
     },
     function(error, status, request) {
       console.log('The ajax request failed: ' + error + ', status: ' + status);
-      card.clear(true);
-      card.subtitle("Error");
-      card.body(error);
+      card.hide();
+      ShowError(error);
     });
-
 }
 
 function buildBoardsMenu(organizations) {
-   
       var itemsMenu = new UI.Menu({
         highlightBackgroundColor: Feature.color('vivid-violet', 'dark-gray'),
         sections: organizations
@@ -283,7 +555,7 @@ function buildBoardsMenu(organizations) {
         // console.log('Selected item #' + e.itemIndex + ' of section #' + e.sectionIndex);
         // console.log('The Board is titled "' + e.item.title + '" and has id ' + e.item.id);
         // open board menu (list its Lists)
-        ShowLists(e.item.id);
+        ShowLists(e.item.id, e.item.title);
       });
 
       currentView = 'Boards';
@@ -291,7 +563,7 @@ function buildBoardsMenu(organizations) {
       currentMenu = itemsMenu;
 }
 
-function ShowLists(boardID) {
+function ShowLists(boardID, boardTitle) {
   // lists with cards and id of checklists for each card
 
   var card = Loading('Loading Lists...');
@@ -300,13 +572,13 @@ function ShowLists(boardID) {
     // already loaded (cached)
     console.log('LOAD LISTS FROM CACHE');
     card.hide();
-    buildListsMenu(lists);
+    buildListsMenu(lists, currentBoardName);
     return;
   }
 
-  lists = [], allLists = [];
+  lists = [];
   currentBoardID = boardID;
-  console.log('LOAD LISTS FROM NETWORK');
+  // console.log('LOAD LISTS FROM NETWORK');
   ajax({
       url: 'https://api.trello.com/1/boards/' + boardID + '/lists?cards=open&filter=open&fields=name,idBoard&card_fields=name,idChecklists&key=12336dca832251b5d7405c340e278b9f&token=' + token,
       type: 'json'
@@ -317,12 +589,6 @@ function ShowLists(boardID) {
       for(var b = 0; b < data.length; b++) {
         var theList = data[b];
         if(!arrayContainsValue(lists, theList.id)) {
-          // console.log('List ' + theList.name + ' has ' + theList.cards.length + ' cards');
-          allLists.push({
-            title: theList.name,
-            id: theList.id,
-            idBoard: theList.idBoard
-          });
           if(theList.cards.length>0) {
             lists.push({
               title: theList.name,
@@ -336,55 +602,36 @@ function ShowLists(boardID) {
         }
       }
 
-      // step2: add cards to lists
-      for(var o = 0; o < lists.length; o++) {
-        for(b = 0; b < data.length; b++) {
-          var aList = data[b];
-          if(aList.id === lists[o].id) {
-            // add cards to list items
-            aList.cards.forEach(function(c) {
-              lists[o].items.push({
-                title: c.name,
-                id: c.id,
-                idChecklists: c.idChecklists,
-                // icon: c.idChecklists.length > 0 ? 'images/menu_icon.png' : 'images/menu_icon_inv.png'
-              });
-
-            });
-            
-
-          }
-        }
-      }
-      
       card.hide();
-      currentBoardLists = allLists;
-      buildListsMenu(lists);
+      buildListsMenu(lists,boardTitle);
 
     },
     function(error, status, request) {
       console.log('The ajax request failed: ' + error + ', status: ' + status);
-      card.subtitle("Error");
-      card.body(error);
+      card.hide();
+      ShowError(error);
     });
 
 }
 
-function buildListsMenu(lists) {
+function buildListsMenu(lists, boardTitle) {
     var itemsMenu = new UI.Menu({
         highlightBackgroundColor: Feature.color('vivid-violet', 'dark-gray'),
-        sections: lists
+        sections: [{
+          title: 'Lists in ' + boardTitle,
+          backgroundColor: 'black',
+          textColor: 'white',
+          items: lists
+        }]
       });
 
       itemsMenu.on('select', function(e) {
         // console.log('Selected item #' + e.itemIndex + ' of section #' + e.sectionIndex);
-        // console.log('The Card is titled "' + e.item.title + '" and has id ' + e.item.id);
-        // open card menu (show checlists)
-        // ShowCheckList(e.item.id);
-        ShowCard(e.item.id);
+        ShowList(e.item.id, e.item.title);
       });
 
       currentView = 'Lists';
+      currentBoardName = boardTitle;
       itemsMenu.show();
       currentMenu = itemsMenu;
 }
@@ -393,7 +640,7 @@ function ShowCard(cardID) {
   var card = Loading('Loading Card...');
 
   ajax({
-      url: 'https://api.trello.com/1/card/' + cardID + '?key=12336dca832251b5d7405c340e278b9f&token=' + token,
+      url: 'https://api.trello.com/1/card/' + cardID + '?members=true&key=12336dca832251b5d7405c340e278b9f&token=' + token,
       type: 'json'
     },
     function(data, status, request) {
@@ -418,19 +665,19 @@ function ShowCard(cardID) {
         var dt = new Date(data.due);
         var options = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: 'numeric' };
         w.subtitle('Due ' + dt.toLocaleDateString(dt.getTimezoneOffset(),options) + ' ' + dt.toLocaleTimeString(dt.getTimezoneOffset(),options));
-
       }
 
       // too big text causes an exception! 
+      if(data.desc===null) {data.desc='';}
       if(data.desc.length>420) {
         w.body(data.desc.substr(0,420) + '...');
       } else {
         w.body(data.desc);
       }
       
-        w.on('click', 'select', function() {
-          ShowCardMenu(data.id, data.badges.checkItems);
-        });
+      w.on('click', 'select', function() {
+        ShowCardMenu(data);
+      });
      
      currentView = 'Card';
      currentCardID = cardID;
@@ -439,27 +686,37 @@ function ShowCard(cardID) {
     },
     function(error, status, request) {
       console.log('The ajax request failed: ' + error);
-      card.subtitle("Error");
-      card.body(error);
-      card.show();
+      card.hide();
+      ShowError(error);
     });
 }
 
-function ShowCardMenu(cardID, checkItems) {
+function ShowCardMenu(card) {
+  // console.log('CARD: ' + JSON.stringify(card));
+  var cardID =card.id, checkItems = card.badges.checkItems; //, members = card.members;
+
   var items=[{
               title: 'Move Card',
               idCard: cardID,
               icon: 'images/move_icon.png'
             }];
-  console.log('ShowCardMenu checkItems=' + checkItems);
 
   if(checkItems>0) {
     items.push({
-      title: 'Show Checklists',
+      title: 'Checklists',
       idCard: cardID,
       icon: 'images/Listicon.png'
     });
   }
+
+  // if(members.length>0) {
+  //   items.push({
+  //     title: 'Members',
+  //     idCard: cardID,
+  //     icon: 'images/Listicon.png'
+  //   });
+  // }
+
   var menu = new UI.Menu( {
     highlightBackgroundColor: Feature.color('vivid-violet', 'dark-gray'),
         icon: 'images/menu_icon.png',
@@ -476,13 +733,13 @@ function ShowCardMenu(cardID, checkItems) {
     switch(e.itemIndex) {
       case 0:
       menu.hide();
-      ShowMoveCardMenu(cardID);
+      ShowMoveCardMenu(card);
       break;
 
       case 1:
       // move card to another list
       menu.hide();
-      ShowCheckList(cardID);
+      ShowCheckLists(cardID);
       break;
     }
 
@@ -491,47 +748,74 @@ function ShowCardMenu(cardID, checkItems) {
   menu.show();
 }
 
-function ShowMoveCardMenu(cardID) {
-  var menu = new UI.Menu( {
-    highlightBackgroundColor: Feature.color('vivid-violet', 'dark-gray'),
-        icon: 'images/menu_icon.png',
-        sections: [{
-          title: 'Move card to...',
-          backgroundColor: 'white',
-          textColor: 'black',
-          items: currentBoardLists
-        }]
-  });
+function ShowMoveCardMenu(card) {
+  //load lists
+  var currentBoardLists = [];
+  ajax({
+      url: 'https://api.trello.com/1/boards/' + card.idBoard + '/lists?cards=open&filter=open&fields=name,idBoard&card_fields=name,idChecklists&key=12336dca832251b5d7405c340e278b9f&token=' + token,
+      type: 'json'
+    },
+    function(data, status, request) {
 
-  menu.on('select', function(e) {
-    // move card to list e.item.id
-    console.log('Move card to list ' + e.item.title + ', ' + e.item.id);
-      ajax({
-        url: 'https://api.trello.com/1/card/' + cardID + '?idList=' + e.item.id + '&key=12336dca832251b5d7405c340e278b9f&token=' + token,
-        type: 'json',
-        method: 'put'
-      },
-      function(data, status, request) {
-        Vibe.vibrate('short');
-        // reload card
-        menu.hide();
-        ShowCard(cardID);
-        return;
-      },
-      function(error, status, request) {
-        console.log('The ajax request failed: ' + error);
-        // menu.clear(true);
-        menu.title("Error");
-        menu.body(error);
+      // parse lists
+      for(var b = 0; b < data.length; b++) {
+        var theList = data[b];
+        if(!arrayContainsValue(currentBoardLists, theList.id)) {
+          // console.log('List ' + theList.name + ' has ' + theList.cards.length + ' cards');
+          currentBoardLists.push({
+            title: theList.name,
+            id: theList.id,
+            idBoard: theList.idBoard
+          });
+        }
+      }
+
+      var menu = new UI.Menu( {
+        highlightBackgroundColor: Feature.color('vivid-violet', 'dark-gray'),
+            icon: 'images/menu_icon.png',
+            sections: [{
+              title: 'Move card to...',
+              backgroundColor: 'black',
+              textColor: 'white',
+              items: currentBoardLists
+            }]
       });
 
+      menu.on('select', function(e) {
+        // move card to list e.item.id
+        console.log('Move card to list ' + e.item.title + ', ' + e.item.id);
+          ajax({
+            url: 'https://api.trello.com/1/card/' + card.id + '?idList=' + e.item.id + '&key=12336dca832251b5d7405c340e278b9f&token=' + token,
+            type: 'json',
+            method: 'put'
+          },
+          function(data, status, request) {
+            Vibe.vibrate('short');
+            // reload card
+            menu.hide();
+            ShowCard(cardID);
+            return;
+          },
+          function(error, status, request) {
+            console.log('The ajax request failed: ' + error);
+            // menu.clear(true);
+            menu.hide();
+            ShowError(error);
+            return;
+          });
+      });
 
-  });
+      menu.show();
 
-  menu.show();
+    },
+    function(error, status, request) {
+      console.log('The ajax request failed: ' + error + ', status: ' + status);
+      card.hide();
+      ShowError(error);
+    });
 }
 
-function ShowCheckList(cardID,sectionIndex, itemIndex) {
+function ShowCheckLists(cardID,sectionIndex, itemIndex) {
   // console.log('ShowCheckList');
   var card = Loading('Loading Checklists...');
   
@@ -590,14 +874,14 @@ function ShowCheckList(cardID,sectionIndex, itemIndex) {
           Vibe.vibrate('short');
           // reload
           itemsMenu.hide();
-          ShowCheckList(cardID,e.sectionIndex, e.itemIndex);
+          ShowCheckLists(cardID,e.sectionIndex, e.itemIndex);
           return;
         },
         function(error, status, request) {
           console.log('The ajax request failed: ' + error);
-          card.subtitle("Error");
-          card.body(error);
-          card.show();
+          card.hide();
+          ShowError(error);
+          return;
         });
 
       });
@@ -620,9 +904,8 @@ function ShowCheckList(cardID,sectionIndex, itemIndex) {
     },
     function(error, status, request) {
       console.log('The ajax request failed: ' + error);
-      card.subtitle("Error");
-      card.body(error);
-      card.show();
+      card.hide();
+      ShowError(error);
     }
   );
 }
@@ -663,14 +946,14 @@ function ShowCheckListItem(title, description, state, cardID, itemID) {
         },
         function(error, status, request) {
           console.log('The ajax request failed: ' + error);
-          iwin.subtitle("Error");
-          iwin.body(error);
-          iwin.show();
+          iwin.hide();
+          ShowError(error);
+          return;
         });
 
       });
 
-        iwin.show();       
+      iwin.show();       
 }
 
 function PleaseConfigure() {
@@ -684,3 +967,133 @@ function PleaseConfigure() {
         });
         iwin.show();       
 }
+
+function ShowOrganizations() {
+  if(token===undefined) {
+    // re-read token, fix issue at first run (avoid having to close and open again watchapp)
+    token = Settings.option('token');
+  }
+  if(token===undefined) {
+    PleaseConfigure();
+    return;
+  }
+
+  var card = Loading('Loading Organizations...');
+
+  ajax({
+      url: 'https://api.trello.com/1/member/me/organizations?fields=displayName&key=12336dca832251b5d7405c340e278b9f&token=' + token,
+      type: 'json'
+    },
+    function(data, status, request) {
+
+      var orgs = [];
+      for(var i=0; i < data.length; i++) {
+        orgs.push({
+          id: data[i].id,
+          title: data[i].displayName
+        });
+      }
+      var itemsMenu = new UI.Menu({
+        highlightBackgroundColor: Feature.color('vivid-violet', 'dark-gray'),
+        sections: [ {
+          title: 'Organizations',
+          backgroundColor: 'black',
+          textColor: 'white',
+          items: orgs
+        }
+        ]
+      });
+
+      itemsMenu.on('select', function(e) {
+        // console.log('Selected item #' + e.itemIndex + ' of section #' + e.sectionIndex);
+        ShowBoards('organization', e.item.id);
+      });
+
+      card.hide();
+      currentView='Organizations';
+      itemsMenu.show();
+
+    },
+    function(error, status, request) {
+      console.log('The ajax request failed: ' + error + ', status: ' + status);
+      // card.clear(true);
+      card.hide();
+      ShowError(error);
+    });
+}
+
+function ShowList(listID, listTitle) {
+  var card = Loading('Loading cards...');
+
+  ajax({
+      url: 'https://api.trello.com/1/lists/' + listID + '/cards?fields=name&filter=open&key=12336dca832251b5d7405c340e278b9f&token=' + token,
+      type: 'json'
+    },
+    function(data, status, request) {
+
+      var cards = [];
+      for(var i=0; i < data.length; i++) {
+        cards.push({
+          id: data[i].id,
+          title: data[i].name
+        });
+      }
+      var itemsMenu = new UI.Menu({
+        highlightBackgroundColor: Feature.color('vivid-violet', 'dark-gray'),
+        sections: [ {
+          title: 'Cards in ' + listTitle,
+          backgroundColor: 'black',
+          textColor: 'white',
+          items: cards
+        }
+        ]
+      });
+
+      itemsMenu.on('select', function(e) {
+        // console.log('Selected item #' + e.itemIndex + ' of section #' + e.sectionIndex);
+        ShowCard(e.item.id);
+      });
+
+      card.hide();
+      itemsMenu.show();
+      currentView = 'List';
+      currentlistID = listID;
+      currentlistTitle=listTitle;
+
+    },
+    function(error, status, request) {
+      console.log('The ajax request failed: ' + error + ', status: ' + status);
+      // card.clear(true);
+      card.hide();
+      ShowError(error);
+    });
+
+}
+
+function ShowError(err) {
+  var errWin = new UI.Card({
+        title: 'Error',
+        body: err + '\nPlease report at github.com/trapias/Petrello'
+      });
+  errWin.show();
+}
+
+function getListBoardName(listID) {
+ // console.log('getListBoardName ' + listID);
+  ajax({
+      url: 'https://api.trello.com/1/lists/' + listID + '?board=true&fields=name&board_fields=name&key=12336dca832251b5d7405c340e278b9f&token=' + token,
+      type: 'json',
+      async: false
+    },
+    function(data, status, request) {
+      console.log('NAME: ' + data.board.name + ' > ' + data.name);
+      return data.board.name + ' > ' + data.name;
+    },
+    function(error, status, request) {
+      console.log('The ajax request failed: ' + error + ', status: ' + status);
+      // card.clear(true);
+      ShowError(error);
+      return null;
+    });  
+}
+
