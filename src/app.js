@@ -16,6 +16,8 @@
  * - 1.5:
  *   - refactored navigation with a main menu and new ways to navigate Trello data
  *   - bugfixes
+ * - 1.6:
+ *   - new function to set timeline pins for assigned cards with a due date
  */
 var UI = require('ui');
 var Vector2 = require('vector2');
@@ -25,7 +27,7 @@ var Feature = require('platform/feature');
 var Accel = require('ui/accel');
 var Settings = require('settings');
 // var Timeline = require('timeline');
-// var timeline = require('./timeline');
+var Timeline = require('./timeline');
 
 // globals
 var organizations = [], lists = [];
@@ -225,6 +227,10 @@ function ShowMainMenu() {
             {
               title: 'My cards',
               icon: 'images/icon-user.png'
+            },
+            {
+              title: 'Set Timeline',
+              icon: 'images/TIMELINE_CALENDAR.png'
             }
           ]
         }]
@@ -251,10 +257,112 @@ function ShowMainMenu() {
       case 4:
       ShowMyCards();
       break;
+
+      case 5:
+      TimelinePins();
+      break;
+
       }
   });
 
   menu.show();
+}
+
+function TimelinePins() {
+  var card = new UI.Card({
+    title: 'Send to timeline',
+    body: 'By clicking the select button you will add a timeline pin for each of your Trello cards (assigned to you) that have a due date suitable for the timeline (no more than two days in the past, or a year in the future).',
+    scrollable: true,
+    action: {
+      backgroundColor: 'black',
+      select: 'images/TIMELINE_CALENDAR.png'     // cards actions menu
+    }
+  });
+
+  card.on('click', 'select', function() {
+    // console.log('Selected item #' + e.itemIndex + ' of section #' + e.sectionIndex);
+    card.hide();
+    SetTimelinePins();
+  });
+
+  card.show();
+
+}
+
+function SetTimelinePins() {
+  var card = Loading('Loading my cards...');
+  var cardsFound=0, pinsSet=0;
+  var now = new Date();
+  var pastTwoDays=new Date(now.getFullYear(),now.getMonth(),now.getDate()-2, now.getHours(), now.getMinutes(), now.getSeconds());
+  var nextYear=new Date(now.getFullYear()+1,now.getMonth(),now.getDate(), now.getHours(), now.getMinutes(), now.getSeconds());
+
+  ajax({
+      url: 'https://api.trello.com/1/member/me/cards?members=true&filter=open&fields=name,desc,due&key=12336dca832251b5d7405c340e278b9f&token=' + token,
+      type: 'json'
+    },
+    function(data, status, request) {
+
+      var cards = [];
+
+      // step1: parse cards
+      for(var b = 0; b < data.length; b++) {
+        var theCard = data[b];
+
+        if(theCard.closed) {continue;}
+
+        cardsFound++;
+          
+        if(theCard.due!==undefined && theCard.due!==null && theCard.due!=="") {
+          var cardDate = new Date(theCard.due);
+          if(cardDate >= pastTwoDays && cardDate <= nextYear) {
+               var pin = {
+              "id": theCard.id,
+              "time": theCard.due,
+              "layout": {
+                "type": "genericPin",
+                "title": theCard.name,
+                "subtitle": "Petrello reminder",
+                "body": theCard.desc,
+                "tinyIcon": "system://images/SCHEDULED_EVENT"
+              }
+            };
+            console.log('INSERT PIN ' + JSON.stringify(pin));
+            Timeline.insertUserPin(pin, pinCallback);
+            pinsSet++;
+          }
+         
+        }
+      }
+
+      // display results
+      card.hide();
+
+      var sBody='';
+      if(cardsFound===0) {
+        sBody = 'No assigned card was found, so no pins have been sent to the timeline.';
+      } else {
+        if(pinsSet>0) {
+          sBody = cardsFound + ' cards have been evaluated, and ' + pinsSet + ' pins have been sent to the timeline. ';
+        } else {
+          sBody = cardsFound + ' cards have been evaluated, but none has a valid due date. No pins have been sent to the timeline';
+        }
+      }
+      sBody += ' Please press the back button to go back to main menu.';
+
+      var resultCard = new UI.Card({
+        title: 'Completed',
+        scrollable: true,
+        body: sBody
+      });
+
+      resultCard.show();
+
+    },
+    function(error, status, request) {
+      console.log('The ajax request failed: ' + error + ', status: ' + status);
+      card.hide();
+      ShowError(error);
+    });
 }
 
 function ShowMyCards() {
@@ -270,7 +378,7 @@ function ShowMyCards() {
   var card = Loading('Loading my cards...');
   
    ajax({
-      url: 'https://api.trello.com/1/member/me/cards?members=true&filter=open&fields=name,idBoard,idList&key=12336dca832251b5d7405c340e278b9f&token=' + token,
+      url: 'https://api.trello.com/1/member/me/cards?members=true&filter=open&fields=name,idBoard,idList,due,desc&key=12336dca832251b5d7405c340e278b9f&token=' + token,
       type: 'json'
     },
     function(data, status, request) {
@@ -321,6 +429,10 @@ function ShowMyCards() {
       card.hide();
       ShowError(error);
     });
+}
+
+function pinCallback(text) {
+  console.log('Pin inserted: ' + text);
 }
 
 var listTitles=[];
